@@ -1,0 +1,57 @@
+# ========== Keil MDK 项目文件 ==========
+*.uvprojx
+*.uvoptx
+*.uvguix.*
+*.uvmpw
+*.ini
+
+# ========== 编译输出文件 ==========
+*.axf
+*.hex
+*.bin
+*.map
+*.lst
+*.o
+*.d
+*.crf
+*.lnp
+*.dep
+*.bak
+
+# ========== 编译输出目录 ==========
+Objects/
+Listings/
+Build/
+Debug/
+Release/
+output/
+
+# ========== VS Code 配置 ==========
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# ========== 系统文件 ==========
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ========== 临时文件 ==========
+*.tmp
+*.temp
+*.log
+*.swp
+*~
+
+# ========== 可执行文件 ==========
+*.exe
+*.out
+*.app
+
+# ========== 本地配置文件 ==========
+*.local
+*.user
+*.suo
+*.sdf
