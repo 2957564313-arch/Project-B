@@ -236,17 +236,38 @@ void Filter_Update(float gx_dps, float gy_dps, float gz_dps,
         s_az_f = s_az_f + s_alphaAcc * (az_g - s_az_f);
     }
 
-    /* ---------------------- 3. Mahony 姿态更新 ---------------------- */
+        /* ---------------------- 3. Mahony 姿态更新 ---------------------- */
 
     /* deg/s -> rad/s */
     const float DEG_TO_RAD = 0.017453292519943295f;  /* pi/180 */
 
     float gx = s_gx_f * DEG_TO_RAD;
     float gy = s_gy_f * DEG_TO_RAD;
-    float gz = s_gz_f * DEG_TO_RAD;
+
+    /* 对 Z 轴做一个“死区”：小于某个阈值就当 0，压住静止漂移 */
+    float gz_dps_for_update = s_gz_f;
+
+    /* 比如设阈值为 0.8 °/s，你可以根据实际情况微调 0.5~2.0 之间 */
+    const float GZ_DEADZONE = 0.8f;
+
+    if (gz_dps_for_update >  GZ_DEADZONE)
+    {
+        gz_dps_for_update -= GZ_DEADZONE;
+    }
+    else if (gz_dps_for_update < -GZ_DEADZONE)
+    {
+        gz_dps_for_update += GZ_DEADZONE;
+    }
+    else
+    {
+        gz_dps_for_update = 0.0f;
+    }
+
+    float gz = gz_dps_for_update * DEG_TO_RAD;
 
     /* 加速度用滤波后的值 */
     MahonyAHRSupdateIMU(gx, gy, gz, s_ax_f, s_ay_f, s_az_f);
+
 }
 
 /**
