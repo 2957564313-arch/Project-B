@@ -1,6 +1,39 @@
-/* Serial.c —— MCU-B 串口发送模块 */
-
 #include "Serial.h"
+#include <stdio.h>
+#include <stdlib.h>
+
+/**
+ * @brief  把浮点（度）转成 "xx.x" 形式并打包发送：
+ *         格式：@IMU,P=pp.p,R=rr.r,Y=yy.y\r\n
+ *         注意：这里内部只用 %d，不用 %f，避免浮点 printf 的坑
+ */
+void Serial_SendIMUPacket(float pitch_deg, float roll_deg, float yaw_deg)
+{
+    char buf[64];
+
+    /* 放大 10 倍转整数，顺便四舍五入 */
+    int32_t p10 = (int32_t)(pitch_deg * 10.0f);
+    int32_t r10 = (int32_t)(roll_deg  * 10.0f);
+    int32_t y10 = (int32_t)(yaw_deg   * 10.0f);
+
+    /* 分离整数部分和小数一位（带符号） */
+    int32_t p_int = p10 / 10;
+    int32_t r_int = r10 / 10;
+    int32_t y_int = y10 / 10;
+
+    int32_t p_frac = abs(p10 % 10);
+    int32_t r_frac = abs(r10 % 10);
+    int32_t y_frac = abs(y10 % 10);
+
+    int len = sprintf(buf,
+                      "@IMU,P=%ld.%01ld,R=%ld.%01ld,Y=%ld.%01ld\r\n",
+                      (long)p_int, (long)p_frac,
+                      (long)r_int, (long)r_frac,
+                      (long)y_int, (long)y_frac);
+
+    Serial_SendArray((uint8_t *)buf, (uint16_t)len);
+}
+
 
 /**
  * @brief  USART1 初始化：PA9 TX, PA10 RX
@@ -84,19 +117,4 @@ int fputc(int ch, FILE *f)
 void Serial_SendHeartbeat(void)
 {
     Serial_SendString((uint8_t*)"@H\r\n");
-}
-
-/**
- * @brief  发送 IMU 数据包
- * @note   要和 MCU-A 的解析格式严格一致
- */
-void Serial_SendIMUPacket(float pitch_deg, float roll_deg, float yaw_deg)
-{
-    char buf[64];
-    int len = sprintf(buf, "@IMU,P=%.2f,R=%.2f,Y=%.2f\r\n",
-                      pitch_deg, roll_deg, yaw_deg);
-    if (len > 0)
-    {
-        Serial_SendArray((uint8_t*)buf, (uint16_t)len);
-    }
 }

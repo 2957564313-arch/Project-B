@@ -82,16 +82,16 @@ void MyI2C_SendByte(uint8_t Byte)
     uint8_t i;
     for (i = 0; i < 8; i++)
     {
-        /* 取出当前位：从高位到低位 */
-        if (Byte & (0x80 >> i))
-            MyI2C_W_SDA(1);
-        else
-            MyI2C_W_SDA(0);
+        /* 依次从最高位到最低位输出：先算出当前这一位是 0 还是 1 */
+        uint8_t bit = (Byte & (0x80 >> i)) ? 1u : 0u;
+        MyI2C_W_SDA(bit);
 
-        MyI2C_W_SCL(1);   /* 在 SCL 上升沿采样 */
+        /* 在 SCL 高电平期间从机采样 SDA */
+        MyI2C_W_SCL(1);
         MyI2C_W_SCL(0);
     }
 }
+
 
 /**
  * @brief  接收 1 字节

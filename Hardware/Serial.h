@@ -4,7 +4,7 @@
 #define __SERIAL_H
 
 #include "stm32f10x.h"
-#include <stdio.h>
+
 
 /**
  * @brief  USART1 初始化（PA9 TX, PA10 RX）
