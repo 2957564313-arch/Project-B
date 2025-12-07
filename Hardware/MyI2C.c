@@ -1,95 +1,145 @@
-#include "stm32f10x.h"                  // Device header
+#include "stm32f10x.h"
 #include "Delay.h"
+#include "MyI2C.h"
 
-void MyI2C_W_SCL(uint8_t BitValue)	//传1置高电平，传0置低电平 W代表写
+/**
+ * @brief  写 SCL 引脚电平
+ * @param  BitValue 1=高电平, 0=低电平
+ */
+void MyI2C_W_SCL(uint8_t BitValue)
 {
-	GPIO_WriteBit(GPIOB,GPIO_Pin_10,(BitAction)BitValue);
-	Delay_us(10);
+    GPIO_WriteBit(GPIOB, GPIO_Pin_10, (BitAction)BitValue);
+    Delay_us(5);
 }
 
-void MyI2C_W_SDA(uint8_t BitValue)	//传1置高电平，传0置低电平
+/**
+ * @brief  写 SDA 引脚电平
+ */
+void MyI2C_W_SDA(uint8_t BitValue)
 {
-	GPIO_WriteBit(GPIOB,GPIO_Pin_11,(BitAction)BitValue);
-	Delay_us(10);
+    GPIO_WriteBit(GPIOB, GPIO_Pin_11, (BitAction)BitValue);
+    Delay_us(5);
 }
 
-uint8_t MyI2C_R_SDA(void)	//读SDA
+/**
+ * @brief  读 SDA 电平
+ */
+uint8_t MyI2C_R_SDA(void)
 {
-	uint8_t BitValue;
-	BitValue = GPIO_ReadInputDataBit(GPIOB, GPIO_Pin_11);
-	Delay_us(10);
-	return BitValue;
+    uint8_t BitValue;
+    BitValue = GPIO_ReadInputDataBit(GPIOB, GPIO_Pin_11);
+    Delay_us(5);
+    return BitValue;
 }
 
+/**
+ * @brief  软件 I2C 引脚初始化
+ * @note   PB10=SCL, PB11=SDA  开漏输出
+ */
 void MyI2C_Init(void)
 {
-	RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB,ENABLE);
-	
-	GPIO_InitTypeDef GPIO_InitStructure;
-	GPIO_InitStructure.GPIO_Mode =GPIO_Mode_Out_OD ; //开漏输出，但是可以输入
-	GPIO_InitStructure.GPIO_Pin =GPIO_Pin_10|GPIO_Pin_11 ;
-	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
-	GPIO_Init(GPIOB,&GPIO_InitStructure);
-	
-	GPIO_SetBits(GPIOB,GPIO_Pin_10|GPIO_Pin_11);	//SCL和SDA置高电平，I2C总线处于空闲状态
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
+
+    GPIO_InitTypeDef GPIO_InitStructure;
+    GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_Out_OD;       /* 开漏输出，可读可写 */
+    GPIO_InitStructure.GPIO_Pin   = GPIO_Pin_10 | GPIO_Pin_11;
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIO_Init(GPIOB, &GPIO_InitStructure);
+
+    /* 总线空闲状态：SCL=1, SDA=1 */
+    GPIO_SetBits(GPIOB, GPIO_Pin_10 | GPIO_Pin_11);
 }
 
+/**
+ * @brief  I2C 起始信号
+ * @note   SDA在SCL高电平时从1->0
+ */
 void MyI2C_Start(void)
 {
-	MyI2C_W_SDA(1); //释放SCL和SDA
-	MyI2C_W_SCL(1);
-	MyI2C_W_SDA(0); //拉低SCL和SDA
-	MyI2C_W_SCL(0);
+    MyI2C_W_SDA(1);
+    MyI2C_W_SCL(1);
+    MyI2C_W_SDA(0);
+    MyI2C_W_SCL(0);
 }
 
+/**
+ * @brief  I2C 停止信号
+ * @note   SDA在SCL高电平时从0->1
+ */
 void MyI2C_Stop(void)
 {
-	MyI2C_W_SDA(0);
-	MyI2C_W_SCL(1);
-	MyI2C_W_SDA(1);
+    MyI2C_W_SDA(0);
+    MyI2C_W_SCL(1);
+    MyI2C_W_SDA(1);
 }
 
+/**
+ * @brief  发送 1 字节
+ * @note   先发送 MSB（最高位）
+ */
 void MyI2C_SendByte(uint8_t Byte)
 {
-	uint8_t i;
-	for(i = 0; i < 8; i ++)	//读取8位数据，第一次读最高位，第二次次高位
-	{
-		MyI2C_W_SDA(Byte & (0x80 >> 1));	//用按位与的方式，取出数据的某一位或某几位（这里是一位））,Byte是 xxxx xxxx, 0x80是 1000 0000,结果得x000 0000
-		MyI2C_W_SCL(1);
-		MyI2C_W_SCL(0);
-	}
+    uint8_t i;
+    for (i = 0; i < 8; i++)
+    {
+        /* 取出当前位：从高位到低位 */
+        if (Byte & (0x80 >> i))
+            MyI2C_W_SDA(1);
+        else
+            MyI2C_W_SDA(0);
+
+        MyI2C_W_SCL(1);   /* 在 SCL 上升沿采样 */
+        MyI2C_W_SCL(0);
+    }
 }
 
+/**
+ * @brief  接收 1 字节
+ */
 uint8_t MyI2C_ReceiveByte(void)
 {
-	uint8_t i,Byte = 0x00;
-	MyI2C_W_SDA(1);
-	for(i = 0; i < 8; i ++)
-	{
-		MyI2C_W_SCL(1);	//高电平读取数据
-		if (MyI2C_R_SDA() == 1){Byte |= (0x80 >> i);}
-		MyI2C_W_SCL(0); //低电平传入下一位数据
-	}
-	return Byte;	
+    uint8_t i, Byte = 0x00;
+
+    /* 释放 SDA，让从机驱动 */
+    MyI2C_W_SDA(1);
+
+    for (i = 0; i < 8; i++)
+    {
+        MyI2C_W_SCL(1);    /* 高电平读取数据 */
+        if (MyI2C_R_SDA() == 1)
+        {
+            Byte |= (0x80 >> i);
+        }
+        MyI2C_W_SCL(0);    /* 低电平准备下一位 */
+    }
+
+    return Byte;
 }
 
+/**
+ * @brief  发送应答位
+ * @param  AckBit 0=ACK, 1=NACK
+ */
 void MyI2C_SendAck(uint8_t AckBit)
-{	
-	MyI2C_W_SDA(AckBit);
-	MyI2C_W_SCL(1);
-	MyI2C_W_SCL(0);
-
+{
+    MyI2C_W_SDA(AckBit);
+    MyI2C_W_SCL(1);
+    MyI2C_W_SCL(0);
 }
 
+/**
+ * @brief  接收应答位
+ * @return 0=ACK, 1=NACK
+ */
 uint8_t MyI2C_ReceiveAck(void)
 {
-	//函数进来时SDA低电平，主机释放SDA
-	uint8_t AckBit;
-	MyI2C_W_SDA(1);
-	MyI2C_W_SCL(1);
-	AckBit = MyI2C_R_SDA();
-	MyI2C_W_SCL(0);
-	return AckBit;	
+    uint8_t AckBit;
+
+    /* 主机释放 SDA，由从机拉低/拉高 */
+    MyI2C_W_SDA(1);
+    MyI2C_W_SCL(1);
+    AckBit = MyI2C_R_SDA();
+    MyI2C_W_SCL(0);
+
+    return AckBit;
 }
-
-
