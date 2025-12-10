@@ -17,7 +17,7 @@ static float g_gz_bias = 0.0f;
  */
 static void Gyro_Calibrate(void)
 {
-    const int N = 500;  // 取 500 个样本，大约 500*5ms = 2.5s
+    const int N = 150;  // 保持 500 次也可以，或者略微减小
     int32_t sum_gx = 0;
     int32_t sum_gy = 0;
     int32_t sum_gz = 0;
@@ -34,18 +34,24 @@ static void Gyro_Calibrate(void)
         sum_gy += gy;
         sum_gz += gz;
 
-        Delay_ms(5);   // 5ms 间隔，保证有时间刷新
+        /* ★ 每隔 10 次发送一个心跳，约 10*5ms = 50ms 发一次 ★ */
+        if ((i % 10) == 0)
+        {
+            Serial_SendHeartbeat();   // @H\r\n
+        }
+
+        Delay_ms(5);
     }
 
     float avg_gx = (float)sum_gx / (float)N;
     float avg_gy = (float)sum_gy / (float)N;
     float avg_gz = (float)sum_gz / (float)N;
 
-    /* 按你现在的量程：±2000dps => 16.4 LSB/(deg/s) */
     g_gx_bias = avg_gx / 16.4f;
     g_gy_bias = avg_gy / 16.4f;
     g_gz_bias = avg_gz / 16.4f;
 }
+
 
 
 int main(void)
