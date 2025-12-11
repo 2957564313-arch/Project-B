@@ -1,16 +1,40 @@
-/* filter.c —— 限幅 + 一阶低通 + Mahony IMU 姿态解算 */
+/* filter.c —— 限幅 + 一阶低通 + Mahony IMU 姿态解算（MCU-B） */
 
 #include "filter.h"
 #include <math.h>
 
+/* ====================== 可调参数区域 BEGIN ====================== */
+
+/* 默认采样频率（Hz），和你 main 里 10ms 对应 100Hz 保持一致 */
+#define FILTER_SAMPLE_FREQ_DEFAULT   100.0f
+
+/* Mahony 增益：Kp 越大，静止后恢复越快；Ki 先保持很小只做长期校正 */
+#define MAHONY_KP    1.2f       /* 原来 4.0f 太大了，容易“发力过猛+奇怪动态” */
+#define MAHONY_KI    0.01f      /* 给一点点积分，纠长期偏差，不至于明显影响动态 */
+
+/* 陀螺仪 / 加速度 限幅 */
+#define GYRO_LIMIT_DPS    500.0f
+#define ACC_LIMIT_G       4.0f
+
+/* 一阶低通滤波系数（0~1，越大越“跟手”） */
+#define GYRO_LPF_ALPHA    1.0f     /* 陀螺不过滤，保持你现在的动态 */
+#define ACC_LPF_ALPHA     0.40f    /* 从 0.25f 提到 0.40f，让静止收敛更快一点 */
+
+/* 陀螺仪死区（抑制极慢漂移） */
+#define GYRO_DEADZONE_DPS  0.05f   /* 从 0.1f 降一点，避免过早砍小角速度 */
+
+
+/* ====================== 可调参数区域 END ====================== */
+
+
 /* ------------------------- Mahony 参数与状态 ------------------------- */
 
 /* 采样频率（Hz），由 Filter_Init 设置 */
-static float s_sampleFreq = 100.0f;
+static float s_sampleFreq = FILTER_SAMPLE_FREQ_DEFAULT;
 
-/* Mahony 增益参数：twoKp = 2*Kp, twoKi = 2*Ki */
-static volatile float twoKp = 2.0f * 0.5f;   /* Kp = 0.5，姿态收敛速度 */
-static volatile float twoKi = 2.0f * 0.0f;   /* Ki = 0.0，先不启用积分 */
+/* Mahony 增益（内部用 twoKp=2*Kp, twoKi=2*Ki） */
+static volatile float twoKp = 2.0f * MAHONY_KP;
+static volatile float twoKi = 2.0f * MAHONY_KI;
 
 /* 四元数（当前姿态） */
 static volatile float q0 = 1.0f;
@@ -25,13 +49,9 @@ static volatile float integralFBz = 0.0f;
 
 /* ------------------------- 输入限幅 + 一阶低通 ------------------------- */
 
-/* 陀螺仪、加速度的限幅阈值（可以根据实际调） */
-#define GYRO_LIMIT_DPS   500.0f   /* 陀螺仪限幅：±500 °/s */
-#define ACC_LIMIT_G      4.0f     /* 加速度限幅：±4 g */
-
-/* 一阶低通滤波系数（0~1，越大越快、越小越平滑） */
-static float s_alphaGyro = 0.3f;   /* 陀螺仪低通系数 */
-static float s_alphaAcc  = 0.3f;   /* 加速度低通系数 */
+/* 一阶低通滤波系数（运行时可通过 Filter_Init 调整为上面宏值） */
+static float s_alphaGyro = GYRO_LPF_ALPHA;
+static float s_alphaAcc  = ACC_LPF_ALPHA;
 
 /* 低通滤波后的值 */
 static float s_gx_f = 0.0f;
@@ -43,6 +63,9 @@ static float s_az_f = 1.0f;   /* 默认认为刚开始静止，重力朝 +Z */
 
 /* 是否已经完成第一次滤波初始化 */
 static uint8_t s_filterInited = 0;
+static float s_kpScale = 1.0f;   /* 静止时会 >1.0，加快收敛 */
+
+
 
 /* --------------------------- 内部工具函数 --------------------------- */
 
@@ -113,10 +136,12 @@ static void MahonyAHRSupdateIMU(float gx, float gy, float gz,
         integralFBz = 0.0f;
     }
 
-    /* 5. 比例项修正角速度 */
-    gx += twoKp * halfex;
-    gy += twoKp * halfey;
-    gz += twoKp * halfez;
+        /* 5. 比例项修正角速度（根据静止检测放大或缩小 Kp） */
+    float twoKp_eff = twoKp * s_kpScale;
+    gx += twoKp_eff * halfex;
+    gy += twoKp_eff * halfey;
+    gz += twoKp_eff * halfez;
+
 
     /* 6. 四元数微分方程积分 */
     gx *= 0.5f * (1.0f / s_sampleFreq);
@@ -140,6 +165,7 @@ static void MahonyAHRSupdateIMU(float gx, float gy, float gz,
     q3 *= recipNorm;
 }
 
+
 /* --------------------------- 对外接口实现 --------------------------- */
 
 void Filter_Init(float sampleFreqHz)
@@ -147,6 +173,10 @@ void Filter_Init(float sampleFreqHz)
     if (sampleFreqHz > 0.0f)
     {
         s_sampleFreq = sampleFreqHz;
+    }
+    else
+    {
+        s_sampleFreq = FILTER_SAMPLE_FREQ_DEFAULT;
     }
 
     /* 重置姿态为单位四元数 */
@@ -169,18 +199,16 @@ void Filter_Init(float sampleFreqHz)
 
     s_filterInited = 0;
 
-    /* 你可以在这里根据采样频率重新算一阶低通的 alpha，这里先用常数 */
-    s_alphaGyro = 0.3f;
-    s_alphaAcc  = 0.3f;
-
-    /* Kp/Ki 也可以在这里微调 */
-    twoKp = 2.0f * 0.5f;
-    twoKi = 2.0f * 0.0f;  /* 如需增强静态精度，可以给 Ki 一点点值 */
+    /* 把 Mahony 增益、低通系数同步为宏设定值 */
+    twoKp = 2.0f * MAHONY_KP;
+    twoKi = 2.0f * MAHONY_KI;
+    s_alphaGyro = GYRO_LPF_ALPHA;
+    s_alphaAcc  = ACC_LPF_ALPHA;
 }
 
 /**
  * @brief  每次 IMU 采样后调用一次，完成：
- *         1. 陀螺仪 & 加速度 限幅
+ *         1. 陀螺仪 & 加速度 限幅 + 死区
  *         2. 一阶低通滤波
  *         3. Mahony 姿态更新
  * @param  gx_dps,gy_dps,gz_dps  陀螺仪角速度，单位：deg/s
@@ -189,6 +217,11 @@ void Filter_Init(float sampleFreqHz)
 void Filter_Update(float gx_dps, float gy_dps, float gz_dps,
                    float ax_g,  float ay_g,  float az_g)
 {
+    /* ---------------------- 0. 陀螺仪死区（抑制微弱漂移） ---------------------- */
+    if (fabsf(gx_dps) < GYRO_DEADZONE_DPS) gx_dps = 0.0f;
+    if (fabsf(gy_dps) < GYRO_DEADZONE_DPS) gy_dps = 0.0f;
+    if (fabsf(gz_dps) < GYRO_DEADZONE_DPS) gz_dps = 0.0f;
+
     /* ---------------------- 1. 限幅（抗突变防炸） ---------------------- */
 
     /* 陀螺仪限幅 */
@@ -236,38 +269,44 @@ void Filter_Update(float gx_dps, float gy_dps, float gz_dps,
         s_az_f = s_az_f + s_alphaAcc * (az_g - s_az_f);
     }
 
-        /* ---------------------- 3. Mahony 姿态更新 ---------------------- */
+	    /* ---------------- 2.5 静止检测：静止时加大 Kp，加快收敛 ---------------- */
+    {
+        /* 加速度模长，理论上静止时 ≈1g */
+        float acc_norm = sqrtf(s_ax_f * s_ax_f +
+                               s_ay_f * s_ay_f +
+                               s_az_f * s_az_f);
+
+        /* 陀螺总角速度（简单用 L1 范数） */
+        float gyro_sum = fabsf(gx_dps) + fabsf(gy_dps) + fabsf(gz_dps);
+
+        /* 判定阈值你可以按需要微调 */
+        uint8_t is_static =
+            (fabsf(acc_norm - 1.0f) < 0.10f) &&   /* 加速度模长离 1g 不超过 0.10g */
+            (gyro_sum < 3.0f);                    /* 三个轴角速度和 < 3deg/s */
+
+        if (is_static)
+        {
+            /* 静止：把 Kp 放大 3 倍，加快拉回真实姿态 */
+            s_kpScale = 3.0f;
+        }
+        else
+        {
+            /* 运动中：用正常的 Kp */
+            s_kpScale = 1.0f;
+        }
+    }
+
+    /* ---------------------- 3. Mahony 姿态更新 ---------------------- */
 
     /* deg/s -> rad/s */
     const float DEG_TO_RAD = 0.017453292519943295f;  /* pi/180 */
 
     float gx = s_gx_f * DEG_TO_RAD;
     float gy = s_gy_f * DEG_TO_RAD;
-
-    /* 对 Z 轴做一个“死区”：小于某个阈值就当 0，压住静止漂移 */
-    float gz_dps_for_update = s_gz_f;
-
-    /* 比如设阈值为 0.8 °/s，你可以根据实际情况微调 0.5~2.0 之间 */
-    const float GZ_DEADZONE = 0.8f;
-
-    if (gz_dps_for_update >  GZ_DEADZONE)
-    {
-        gz_dps_for_update -= GZ_DEADZONE;
-    }
-    else if (gz_dps_for_update < -GZ_DEADZONE)
-    {
-        gz_dps_for_update += GZ_DEADZONE;
-    }
-    else
-    {
-        gz_dps_for_update = 0.0f;
-    }
-
-    float gz = gz_dps_for_update * DEG_TO_RAD;
+    float gz = s_gz_f * DEG_TO_RAD;
 
     /* 加速度用滤波后的值 */
     MahonyAHRSupdateIMU(gx, gy, gz, s_ax_f, s_ay_f, s_az_f);
-
 }
 
 /**

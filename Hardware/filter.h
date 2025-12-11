@@ -1,4 +1,4 @@
-/* filter.h —— 姿态滤波与解算接口 */
+/* filter.h —— 姿态滤波与解算接口（MCU-B） */
 
 #ifndef __FILTER_H
 #define __FILTER_H
@@ -8,13 +8,14 @@
 /**
  * @brief  姿态滤波器初始化
  * @param  sampleFreqHz 采样频率（单位 Hz），例如 100.0f
+ * @note   只影响内部积分步长，不改采样节奏
  */
 void Filter_Init(float sampleFreqHz);
 
 /**
  * @brief  姿态滤波更新（传入一次 IMU 采样）
- * @param  gx_dps,gy_dps,gz_dps  陀螺仪角速度，单位：deg/s
- * @param  ax_g,ay_g,az_g        加速度，单位：g（可近似，算法内部会归一化）
+ * @param  gx_dps,gy_dps,gz_dps  陀螺仪角速度，单位：deg/s（已经做了零偏校准）
+ * @param  ax_g,ay_g,az_g        加速度，单位：g（近似即可，内部会归一化）
  */
 void Filter_Update(float gx_dps, float gy_dps, float gz_dps,
                    float ax_g,  float ay_g,  float az_g);

@@ -17,7 +17,7 @@ static float g_gz_bias = 0.0f;
  */
 static void Gyro_Calibrate(void)
 {
-    const int N = 150;  // 保持 500 次也可以，或者略微减小
+    const int N = 150; 
     int32_t sum_gx = 0;
     int32_t sum_gy = 0;
     int32_t sum_gz = 0;
